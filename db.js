@@ -32,7 +32,17 @@ export const createIndexes = async () => {
             partialFilterExpression: { status: { $in: ['pending', 'accepted'] } },
         }
     )
-    await transactionsCollection.createIndex({ stripeSessionId: 1 }, { unique: true })
+    // Renewal payments have no checkout session, so uniqueness only applies where an id exists
+    await transactionsCollection.dropIndex('stripeSessionId_1').catch(() => {})
+    await transactionsCollection.createIndex(
+        { stripeSessionId: 1 },
+        { unique: true, name: 'unique_session', partialFilterExpression: { stripeSessionId: { $type: 'string' } } }
+    )
+    await transactionsCollection.createIndex(
+        { stripeInvoiceId: 1 },
+        { unique: true, name: 'unique_invoice', partialFilterExpression: { stripeInvoiceId: { $type: 'string' } } }
+    )
+    await transactionsCollection.createIndex({ vendorId: 1, createdAt: -1 })
 }
 
 export default client

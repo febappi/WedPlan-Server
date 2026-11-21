@@ -6,6 +6,7 @@ import { connectToMongoDB, createIndexes } from './db.js'
 import usersRouter from './routes/users.js'
 import servicesRouter from './routes/services.js'
 import bookingsRouter from './routes/bookings.js'
+import paymentsRouter from './routes/payments.js'
 
 const app = express()
 const PORT = process.env.PORT || 5000
@@ -20,6 +21,7 @@ app.get('/', (req, res) => {
 app.use('/users', usersRouter)
 app.use('/services', servicesRouter)
 app.use('/bookings', bookingsRouter)
+app.use('/payments', paymentsRouter)
 
 app.use((req, res) => {
     res.status(404).send({ message: 'Route not found' })
