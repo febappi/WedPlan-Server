@@ -3,6 +3,7 @@ import express from 'express'
 import cors from 'cors'
 import { CLIENT_URL } from './config.js'
 import { connectToMongoDB, createIndexes } from './db.js'
+import usersRouter from './routes/users.js'
 
 const app = express()
 const PORT = process.env.PORT || 5000
@@ -13,6 +14,8 @@ app.use(express.json())
 app.get('/', (req, res) => {
     res.send({ message: 'WedPlan Server is Running' })
 })
+
+app.use('/users', usersRouter)
 
 app.use((req, res) => {
     res.status(404).send({ message: 'Route not found' })
