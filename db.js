@@ -23,6 +23,15 @@ export const createIndexes = async () => {
     await servicesCollection.createIndex({ vendorId: 1 })
     await bookingsCollection.createIndex({ customerId: 1, createdAt: -1 })
     await bookingsCollection.createIndex({ vendorId: 1, createdAt: -1 })
+    // One open request per customer, service and event date. Rejected and cancelled ones do not count.
+    await bookingsCollection.createIndex(
+        { customerId: 1, serviceId: 1, eventDate: 1 },
+        {
+            unique: true,
+            name: 'one_open_booking_per_date',
+            partialFilterExpression: { status: { $in: ['pending', 'accepted'] } },
+        }
+    )
     await transactionsCollection.createIndex({ stripeSessionId: 1 }, { unique: true })
 }
 
