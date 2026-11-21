@@ -1,8 +1,10 @@
 import express from 'express'
 import { servicesCollection } from '../db.js'
 import verifyToken from '../middleware/verifyToken.js'
-import { CATEGORIES } from '../utils/constants.js'
-import { escapeRegex, getPagination, toObjectId } from '../utils/helpers.js'
+import verifyRole, { verifyAdmin, verifyVendor } from '../middleware/verifyRole.js'
+import { CATEGORIES, FREE_ACTIVE_SERVICE_LIMIT, SERVICE_STATUSES } from '../utils/constants.js'
+import { escapeRegex, getPagination, hasActivePremium, toObjectId } from '../utils/helpers.js'
+import { getServiceFields, validateService } from '../utils/validateService.js'
 
 const router = express.Router()
 
@@ -123,6 +125,180 @@ router.get('/', async (req, res) => {
 router.get('/locations', async (req, res) => {
     const locations = await servicesCollection.distinct('location', PUBLIC_MATCH)
     res.send(locations.sort((a, b) => a.localeCompare(b)))
+})
+
+// Admin: every submitted service, with search and a status filter
+router.get('/admin/all', verifyToken, verifyAdmin, async (req, res) => {
+    const { search, status, category } = req.query
+    const { page, limit, skip } = getPagination(req.query, 10)
+
+    const match = {}
+    if (SERVICE_STATUSES.includes(status)) {
+        match.status = status
+    }
+    if (CATEGORIES.includes(category)) {
+        match.category = category
+    }
+
+    const pipeline = [{ $match: match }, ...vendorLookup]
+    if (typeof search === 'string' && search.trim()) {
+        pipeline.push({ $match: getSearchMatch(search) })
+    }
+
+    const [result] = await servicesCollection
+        .aggregate([
+            ...pipeline,
+            {
+                $facet: {
+                    services: [{ $sort: { createdAt: -1 } }, { $skip: skip }, { $limit: limit }],
+                    total: [{ $count: 'count' }],
+                },
+            },
+        ])
+        .toArray()
+
+    const total = result.total[0]?.count || 0
+    res.send({ services: result.services, total, page, totalPages: Math.ceil(total / limit) })
+})
+
+router.patch('/:id/status', verifyToken, verifyAdmin, async (req, res) => {
+    const serviceId = toObjectId(req.params.id)
+    if (!serviceId) {
+        return res.status(400).send({ message: 'Invalid service id' })
+    }
+    if (!SERVICE_STATUSES.includes(req.body.status)) {
+        return res.status(400).send({ message: 'Status must be pending, approved or rejected' })
+    }
+
+    const result = await servicesCollection.updateOne(
+        { _id: serviceId },
+        { $set: { status: req.body.status, reviewedAt: new Date(), updatedAt: new Date() } }
+    )
+    if (result.matchedCount === 0) {
+        return res.status(404).send({ message: 'Service not found' })
+    }
+    res.send({ message: `Service marked as ${req.body.status}` })
+})
+
+// Pending and approved services the vendor keeps available count toward the free plan limit
+const countActiveServices = (vendorId, exceptId) => {
+    const query = { vendorId, isActive: true, status: { $in: ['pending', 'approved'] } }
+    if (exceptId) {
+        query._id = { $ne: exceptId }
+    }
+    return servicesCollection.countDocuments(query)
+}
+
+const planLimitMessage = `The free plan allows ${FREE_ACTIVE_SERVICE_LIMIT} active services. Upgrade to Premium or make another service unavailable first.`
+
+router.get('/mine', verifyToken, verifyVendor, async (req, res) => {
+    const services = await servicesCollection.find({ vendorId: req.user.id }).sort({ createdAt: -1 }).toArray()
+    const activeCount = services.filter((service) => service.isActive && service.status !== 'rejected').length
+    res.send({
+        services,
+        activeCount,
+        activeLimit: hasActivePremium(req.user) ? null : FREE_ACTIVE_SERVICE_LIMIT,
+    })
+})
+
+router.post('/', verifyToken, verifyVendor, async (req, res) => {
+    const errorMessage = validateService(req.body)
+    if (errorMessage) {
+        return res.status(400).send({ message: errorMessage })
+    }
+
+    if (!hasActivePremium(req.user) && (await countActiveServices(req.user.id)) >= FREE_ACTIVE_SERVICE_LIMIT) {
+        return res.status(403).send({ message: planLimitMessage, code: 'PLAN_LIMIT' })
+    }
+
+    const now = new Date()
+    const newService = {
+        ...getServiceFields(req.body),
+        vendorId: req.user.id,
+        status: 'pending',
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+    }
+    const result = await servicesCollection.insertOne(newService)
+    res.status(201).send({ message: 'Service submitted. It will appear once an admin approves it.', serviceId: result.insertedId })
+})
+
+// Finds a service and confirms the signed-in vendor owns it
+const findOwnService = async (req, res) => {
+    const serviceId = toObjectId(req.params.id)
+    if (!serviceId) {
+        res.status(400).send({ message: 'Invalid service id' })
+        return null
+    }
+    const service = await servicesCollection.findOne({ _id: serviceId })
+    if (!service) {
+        res.status(404).send({ message: 'Service not found' })
+        return null
+    }
+    if (!service.vendorId.equals(req.user.id)) {
+        res.status(403).send({ message: 'You can only change your own services' })
+        return null
+    }
+    return service
+}
+
+router.patch('/:id', verifyToken, verifyVendor, async (req, res) => {
+    const service = await findOwnService(req, res)
+    if (!service) {
+        return
+    }
+    const errorMessage = validateService(req.body)
+    if (errorMessage) {
+        return res.status(400).send({ message: errorMessage })
+    }
+
+    // Edited details go back to the admin for review before customers see them again
+    await servicesCollection.updateOne(
+        { _id: service._id, vendorId: req.user.id },
+        { $set: { ...getServiceFields(req.body), status: 'pending', updatedAt: new Date() } }
+    )
+    res.send({ message: 'Service updated. It will be visible again after admin approval.' })
+})
+
+router.patch('/:id/availability', verifyToken, verifyVendor, async (req, res) => {
+    const service = await findOwnService(req, res)
+    if (!service) {
+        return
+    }
+    if (typeof req.body.isActive !== 'boolean') {
+        return res.status(400).send({ message: 'isActive must be true or false' })
+    }
+
+    const turningOn = req.body.isActive && !service.isActive
+    if (turningOn && service.status !== 'rejected' && !hasActivePremium(req.user)) {
+        if ((await countActiveServices(req.user.id, service._id)) >= FREE_ACTIVE_SERVICE_LIMIT) {
+            return res.status(403).send({ message: planLimitMessage, code: 'PLAN_LIMIT' })
+        }
+    }
+
+    await servicesCollection.updateOne(
+        { _id: service._id, vendorId: req.user.id },
+        { $set: { isActive: req.body.isActive, updatedAt: new Date() } }
+    )
+    res.send({ message: req.body.isActive ? 'Service is now available' : 'Service is now unavailable' })
+})
+
+router.delete('/:id', verifyToken, verifyRole('vendor', 'admin'), async (req, res) => {
+    const serviceId = toObjectId(req.params.id)
+    if (!serviceId) {
+        return res.status(400).send({ message: 'Invalid service id' })
+    }
+    const service = await servicesCollection.findOne({ _id: serviceId })
+    if (!service) {
+        return res.status(404).send({ message: 'Service not found' })
+    }
+    if (req.user.role === 'vendor' && !service.vendorId.equals(req.user.id)) {
+        return res.status(403).send({ message: 'You can only delete your own services' })
+    }
+
+    await servicesCollection.deleteOne({ _id: service._id })
+    res.send({ message: 'Service deleted' })
 })
 
 router.get('/:id', verifyToken, async (req, res) => {
