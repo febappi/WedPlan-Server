@@ -7,11 +7,14 @@ import usersRouter from './routes/users.js'
 import servicesRouter from './routes/services.js'
 import bookingsRouter from './routes/bookings.js'
 import paymentsRouter from './routes/payments.js'
+import webhookRouter from './routes/webhook.js'
 
 const app = express()
 const PORT = process.env.PORT || 5000
 
 app.use(cors({ origin: CLIENT_URL }))
+// The Stripe webhook needs the raw body to check its signature, so it is mounted before the JSON parser
+app.use('/payments/webhook', webhookRouter)
 app.use(express.json())
 
 app.get('/', (req, res) => {

@@ -5,6 +5,7 @@ import verifyRole, { verifyAdmin, verifyVendor } from '../middleware/verifyRole.
 import { CATEGORIES, FREE_ACTIVE_SERVICE_LIMIT, SERVICE_STATUSES } from '../utils/constants.js'
 import { escapeRegex, getPagination, hasActivePremium, toObjectId } from '../utils/helpers.js'
 import { getServiceFields, validateService } from '../utils/validateService.js'
+import { enforceFreeLimit } from '../utils/plan.js'
 
 const router = express.Router()
 
@@ -192,6 +193,10 @@ const countActiveServices = (vendorId, exceptId) => {
 const planLimitMessage = `The free plan allows ${FREE_ACTIVE_SERVICE_LIMIT} active services. Upgrade to Premium or make another service unavailable first.`
 
 router.get('/mine', verifyToken, verifyVendor, async (req, res) => {
+    // A lapsed Premium that no webhook reported is caught here
+    if (!hasActivePremium(req.user)) {
+        await enforceFreeLimit(req.user.id)
+    }
     const services = await servicesCollection.find({ vendorId: req.user.id }).sort({ createdAt: -1 }).toArray()
     const activeCount = services.filter((service) => service.isActive && service.status !== 'rejected').length
     res.send({
