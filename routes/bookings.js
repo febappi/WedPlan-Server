@@ -89,4 +89,97 @@ router.post('/', verifyToken, verifyCustomer, async (req, res) => {
     }
 })
 
+// Joins the service and the person on the other side of the booking
+const lookupService = [
+    {
+        $lookup: {
+            from: 'services',
+            localField: 'serviceId',
+            foreignField: '_id',
+            as: 'service',
+            pipeline: [{ $project: { serviceName: 1, images: { $slice: ['$images', 1] }, category: 1, price: 1, location: 1 } }],
+        },
+    },
+    { $unwind: { path: '$service', preserveNullAndEmptyArrays: true } },
+]
+
+const lookupUser = (field, as, projection) => [
+    { $lookup: { from: 'users', localField: field, foreignField: '_id', as, pipeline: [{ $project: projection }] } },
+    { $unwind: { path: `$${as}`, preserveNullAndEmptyArrays: true } },
+]
+
+const getStatusMatch = (status) => (BOOKING_STATUSES.includes(status) ? { status } : {})
+
+router.get('/mine', verifyToken, verifyCustomer, async (req, res) => {
+    const bookings = await bookingsCollection
+        .aggregate([
+            { $match: { customerId: req.user.id, ...getStatusMatch(req.query.status) } },
+            { $sort: { createdAt: -1 } },
+            ...lookupService,
+            ...lookupUser('vendorId', 'vendor', { name: 1, image: 1, businessName: 1, email: 1 }),
+        ])
+        .toArray()
+    res.send(bookings)
+})
+
+router.get('/vendor', verifyToken, verifyVendor, async (req, res) => {
+    const bookings = await bookingsCollection
+        .aggregate([
+            { $match: { vendorId: req.user.id, ...getStatusMatch(req.query.status) } },
+            { $sort: { createdAt: -1 } },
+            ...lookupService,
+            ...lookupUser('customerId', 'customer', { name: 1, image: 1, email: 1 }),
+        ])
+        .toArray()
+    res.send(bookings)
+})
+
+// Explains why a guarded status change matched nothing: wrong id, someone else's booking, or already answered
+const explainMiss = async (res, bookingId, ownerField, userId) => {
+    const booking = await bookingsCollection.findOne({ _id: bookingId })
+    if (!booking) {
+        return res.status(404).send({ message: 'Booking not found' })
+    }
+    if (!booking[ownerField].equals(userId)) {
+        return res.status(403).send({ message: 'This booking belongs to someone else' })
+    }
+    return res.status(409).send({ message: `This request is already ${booking.status} and cannot be changed` })
+}
+
+router.patch('/:id/status', verifyToken, verifyVendor, async (req, res) => {
+    const bookingId = toObjectId(req.params.id)
+    if (!bookingId) {
+        return res.status(400).send({ message: 'Invalid booking id' })
+    }
+    if (!['accepted', 'rejected'].includes(req.body.status)) {
+        return res.status(400).send({ message: 'Status must be accepted or rejected' })
+    }
+
+    // Only the vendor's own pending request can change, in one step
+    const result = await bookingsCollection.updateOne(
+        { _id: bookingId, vendorId: req.user.id, status: 'pending' },
+        { $set: { status: req.body.status, respondedAt: new Date(), updatedAt: new Date() } }
+    )
+    if (result.matchedCount === 0) {
+        return explainMiss(res, bookingId, 'vendorId', req.user.id)
+    }
+    res.send({ message: `Booking request ${req.body.status}` })
+})
+
+router.patch('/:id/cancel', verifyToken, verifyCustomer, async (req, res) => {
+    const bookingId = toObjectId(req.params.id)
+    if (!bookingId) {
+        return res.status(400).send({ message: 'Invalid booking id' })
+    }
+
+    const result = await bookingsCollection.updateOne(
+        { _id: bookingId, customerId: req.user.id, status: 'pending' },
+        { $set: { status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() } }
+    )
+    if (result.matchedCount === 0) {
+        return explainMiss(res, bookingId, 'customerId', req.user.id)
+    }
+    res.send({ message: 'Booking request cancelled' })
+})
+
 export default router

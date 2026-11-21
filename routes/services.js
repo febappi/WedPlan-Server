@@ -1,5 +1,5 @@
 import express from 'express'
-import { servicesCollection } from '../db.js'
+import { bookingsCollection, servicesCollection } from '../db.js'
 import verifyToken from '../middleware/verifyToken.js'
 import verifyRole, { verifyAdmin, verifyVendor } from '../middleware/verifyRole.js'
 import { CATEGORIES, FREE_ACTIVE_SERVICE_LIMIT, SERVICE_STATUSES } from '../utils/constants.js'
@@ -298,6 +298,11 @@ router.delete('/:id', verifyToken, verifyRole('vendor', 'admin'), async (req, re
     }
 
     await servicesCollection.deleteOne({ _id: service._id })
+    // Open requests for a removed service are closed so customers are not left waiting
+    await bookingsCollection.updateMany(
+        { serviceId: service._id, status: 'pending' },
+        { $set: { status: 'cancelled', cancelReason: 'The service was removed', cancelledAt: new Date(), updatedAt: new Date() } }
+    )
     res.send({ message: 'Service deleted' })
 })
 
