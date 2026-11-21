@@ -8,6 +8,7 @@ import servicesRouter from './routes/services.js'
 import bookingsRouter from './routes/bookings.js'
 import paymentsRouter from './routes/payments.js'
 import webhookRouter from './routes/webhook.js'
+import statsRouter from './routes/stats.js'
 
 const app = express()
 const PORT = process.env.PORT || 5000
@@ -25,6 +26,7 @@ app.use('/users', usersRouter)
 app.use('/services', servicesRouter)
 app.use('/bookings', bookingsRouter)
 app.use('/payments', paymentsRouter)
+app.use('/stats', statsRouter)
 
 app.use((req, res) => {
     res.status(404).send({ message: 'Route not found' })
