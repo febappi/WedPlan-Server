@@ -20,6 +20,12 @@ export const connectToMongoDB = async () => {
     console.log('You successfully connected to MongoDB!')
 }
 
+// On Vercel an instance can be frozen and resumed, and the connection may be closed in between.
+// connect() returns at once when the client is healthy and reopens it on the same client when not.
+export const ensureConnected = (req, res, next) => {
+    client.connect().then(() => next(), next)
+}
+
 export const createIndexes = async () => {
     await servicesCollection.createIndex({ status: 1, createdAt: -1 })
     await servicesCollection.createIndex({ vendorId: 1 })

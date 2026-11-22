@@ -2,7 +2,7 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { CLIENT_URL } from './config.js'
-import { connectToMongoDB, createIndexes } from './db.js'
+import { connectToMongoDB, createIndexes, ensureConnected } from './db.js'
 import usersRouter from './routes/users.js'
 import servicesRouter from './routes/services.js'
 import bookingsRouter from './routes/bookings.js'
@@ -14,6 +14,7 @@ const app = express()
 const PORT = process.env.PORT || 5000
 
 app.use(cors({ origin: CLIENT_URL }))
+app.use(ensureConnected)
 // The Stripe webhook needs the raw body to check its signature, so it is mounted before the JSON parser
 app.use('/payments/webhook', webhookRouter)
 app.use(express.json())
