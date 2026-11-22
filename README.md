@@ -6,7 +6,8 @@
 
 This server stores services, booking requests and payments in MongoDB, verifies the JWT sent by the WedPlan frontend, checks the user's role on every protected route, and turns on Premium only after a verified Stripe webhook.
 
-**Live API:** _add the link after deployment_
+**Live API:** [wedplan-server-api.vercel.app](https://wedplan-server-api.vercel.app)
+**Live Site:** [wedplan-febappi.vercel.app](https://wedplan-febappi.vercel.app)
 
 **Client repository:** [github.com/febappi/WedPlan](https://github.com/febappi/WedPlan)
 **Server repository:** [github.com/febappi/WedPlan-Server](https://github.com/febappi/WedPlan-Server)
@@ -123,4 +124,4 @@ Install the [Stripe CLI](https://docs.stripe.com/stripe-cli), sign in with `stri
 stripe listen --forward-to localhost:5000/payments/webhook --events checkout.session.completed,checkout.session.expired,invoice.paid,invoice.payment_failed,customer.subscription.updated,customer.subscription.deleted
 ```
 
-On the live server, add a webhook endpoint for `https://<your-server>/payments/webhook` with the same events in the Stripe dashboard and use its signing secret.
+On the live server, add a webhook endpoint for `https://wedplan-server-api.vercel.app/payments/webhook` with the same events in the Stripe dashboard and use its signing secret.
