@@ -16,6 +16,7 @@ const publicFields = {
     role: 1,
     isBlocked: 1,
     businessName: 1,
+    phone: 1,
     subscriptionPlan: 1,
     subscriptionExpiresAt: 1,
     createdAt: 1,
