@@ -23,6 +23,16 @@ This server stores services, booking requests and payments in MongoDB, verifies 
 
 ---
 
+## Main Features
+
+- JWT verification with Better Auth's public keys, plus role middleware for admins, vendors and customers
+- Public service listing with multi-word search, category, city and price filters, price sorting and pagination
+- Vendor service management with ownership checks, admin review (pending, approved, rejected) and a 3-service free plan limit
+- Booking requests with server-side validation, duplicate protection and one-time accept, reject or cancel
+- Stripe Checkout subscriptions where Premium is switched on only by signed webhook events, including renewals, failed payments and cancellation
+- Admin tools for users (search, role filter, block and unblock), services and read-only transactions
+- Dashboard statistics for each role and consistent `400`, `401`, `403`, `404` and `409` error responses
+
 ## Technologies I Used
 
 - Node.js + Express.js 5
@@ -73,10 +83,12 @@ Users sign in on the Next.js app with Better Auth. The frontend gets a signed JW
 ## Rules the Server Enforces
 
 - **Bookings:** only customers can book; only approved and available services; never your own service; the date cannot be in the past; one open request per customer, service and date (a unique partial index on pending and accepted requests); only pending requests can be accepted, rejected or cancelled, and only once.
-- **Services:** only the owner can edit, switch or delete; edits go back to admin review; free vendors keep at most 3 active services.
+- **Services:** only the owner can edit, switch or delete; edits go back to admin review; free vendors keep at most 3 active services, and a rejected service that returns to review is switched off if that would go over the limit.
 - **Payments:** the vendor always comes from the token; Premium is set only by a verified `checkout.session.completed` or `invoice.paid` webhook; `customer.subscription.deleted` moves the vendor back to Free and switches off services beyond the three newest; there is no endpoint that edits a payment record.
 
-## How to Run Locally
+## Installation and Running Locally
+
+Requires Node.js 20 or newer and a MongoDB database (the same one the frontend uses).
 
 ```bash
 git clone https://github.com/febappi/WedPlan-Server.git
@@ -85,9 +97,9 @@ npm install
 npm run dev
 ```
 
-Use `npm start` to run without auto reload.
+Use `npm start` to run without auto reload. The API runs on `http://localhost:5000`.
 
-Create a `.env` file in the project root before running:
+Create a `.env` file in the project root before running (copy `.env.example`):
 
 ```env
 PORT=5000

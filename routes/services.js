@@ -1,5 +1,5 @@
 import express from 'express'
-import { bookingsCollection, servicesCollection } from '../db.js'
+import { bookingsCollection, servicesCollection, usersCollection } from '../db.js'
 import verifyToken from '../middleware/verifyToken.js'
 import verifyRole, { verifyAdmin, verifyVendor } from '../middleware/verifyRole.js'
 import { CATEGORIES, FREE_ACTIVE_SERVICE_LIMIT, SERVICE_STATUSES } from '../utils/constants.js'
@@ -171,14 +171,22 @@ router.patch('/:id/status', verifyToken, verifyAdmin, async (req, res) => {
         return res.status(400).send({ message: 'Status must be pending, approved or rejected' })
     }
 
-    const result = await servicesCollection.updateOne(
-        { _id: serviceId },
-        { $set: { status: req.body.status, reviewedAt: new Date(), updatedAt: new Date() } }
-    )
-    if (result.matchedCount === 0) {
+    const service = await servicesCollection.findOne({ _id: serviceId })
+    if (!service) {
         return res.status(404).send({ message: 'Service not found' })
     }
-    res.send({ message: `Service marked as ${req.body.status}` })
+
+    const vendor = await usersCollection.findOne({ _id: service.vendorId }, { projection: { subscriptionPlan: 1, subscriptionExpiresAt: 1 } })
+    const switchOff = req.body.status !== 'rejected' && (await isOverLimitOnReturn(service, vendor))
+    await servicesCollection.updateOne(
+        { _id: serviceId },
+        { $set: { status: req.body.status, ...(switchOff && { isActive: false }), reviewedAt: new Date(), updatedAt: new Date() } }
+    )
+    res.send({
+        message: switchOff
+            ? `Service marked as ${req.body.status}. It stays unavailable because the vendor is at the free plan limit.`
+            : `Service marked as ${req.body.status}`,
+    })
 })
 
 // Pending and approved services the vendor keeps available count toward the free plan limit
@@ -191,6 +199,15 @@ const countActiveServices = (vendorId, exceptId) => {
 }
 
 const planLimitMessage = `The free plan allows ${FREE_ACTIVE_SERVICE_LIMIT} active services. Upgrade to Premium or make another service unavailable first.`
+
+// A rejected service does not count toward the limit. When it comes back for review,
+// it is switched off if a free vendor already has the maximum number of active services.
+const isOverLimitOnReturn = async (service, vendor) => {
+    if (service.status !== 'rejected' || !service.isActive || hasActivePremium(vendor)) {
+        return false
+    }
+    return (await countActiveServices(service.vendorId, service._id)) >= FREE_ACTIVE_SERVICE_LIMIT
+}
 
 router.get('/mine', verifyToken, verifyVendor, async (req, res) => {
     // A lapsed Premium that no webhook reported is caught here
@@ -259,11 +276,16 @@ router.patch('/:id', verifyToken, verifyVendor, async (req, res) => {
     }
 
     // Edited details go back to the admin for review before customers see them again
+    const switchOff = await isOverLimitOnReturn(service, req.user)
     await servicesCollection.updateOne(
         { _id: service._id, vendorId: req.user.id },
-        { $set: { ...getServiceFields(req.body), status: 'pending', updatedAt: new Date() } }
+        { $set: { ...getServiceFields(req.body), status: 'pending', ...(switchOff && { isActive: false }), updatedAt: new Date() } }
     )
-    res.send({ message: 'Service updated. It will be visible again after admin approval.' })
+    res.send({
+        message: switchOff
+            ? `Service updated and sent for review. It is unavailable because the free plan allows ${FREE_ACTIVE_SERVICE_LIMIT} active services.`
+            : 'Service updated. It will be visible again after admin approval.',
+    })
 })
 
 router.patch('/:id/availability', verifyToken, verifyVendor, async (req, res) => {
