@@ -42,11 +42,16 @@ app.use((error, req, res, next) => {
 
 try {
     await connectToMongoDB()
-    await createIndexes()
 } catch (error) {
     console.error('MongoDB connection failed:', error.message)
-    process.exit(1)
+    if (!process.env.VERCEL) {
+        process.exit(1)
+    }
+    throw error
 }
+
+// Indexes already exist after the first run, so a cold start does not wait for this check
+createIndexes().catch((error) => console.error('Index setup failed:', error.message))
 
 if (!process.env.VERCEL) {
     app.listen(PORT, () => {

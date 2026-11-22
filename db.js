@@ -12,6 +12,8 @@ export const usersCollection = db.collection('users')
 export const servicesCollection = db.collection('services')
 export const bookingsCollection = db.collection('bookings')
 export const transactionsCollection = db.collection('transactions')
+// Better Auth keeps its signing keys here; the server reads only the public half to check tokens
+export const jwksCollection = db.collection('jwks')
 
 export const connectToMongoDB = async () => {
     await client.connect()
