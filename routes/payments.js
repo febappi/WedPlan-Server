@@ -2,11 +2,13 @@ import express from 'express'
 import { transactionsCollection, usersCollection } from '../db.js'
 import { CLIENT_URL } from '../config.js'
 import verifyToken from '../middleware/verifyToken.js'
-import { verifyVendor } from '../middleware/verifyRole.js'
-import { hasActivePremium } from '../utils/helpers.js'
+import { verifyAdmin, verifyVendor } from '../middleware/verifyRole.js'
+import { getPagination, hasActivePremium } from '../utils/helpers.js'
 import { PREMIUM_PLAN, stripe } from '../utils/stripe.js'
 
 const router = express.Router()
+
+const PAYMENT_STATUSES = ['pending', 'paid', 'failed', 'cancelled']
 
 const requireStripe = (req, res, next) => {
     if (!stripe) {
@@ -112,6 +114,43 @@ router.post('/cancel-subscription', verifyToken, verifyVendor, requireStripe, as
     await stripe.subscriptions.update(vendor.stripeSubscriptionId, { cancel_at_period_end: true })
     await usersCollection.updateOne({ _id: req.user.id }, { $set: { cancelAtPeriodEnd: true } })
     res.send({ message: 'Premium will end when the current month runs out' })
+})
+
+// Admin: every payment, read only. There is no route that changes a payment record,
+// so a failed or pending payment can never be marked paid by hand.
+router.get('/transactions', verifyToken, verifyAdmin, async (req, res) => {
+    const { page, limit, skip } = getPagination(req.query, 10)
+    const match = PAYMENT_STATUSES.includes(req.query.status) ? { status: req.query.status } : {}
+
+    const [result] = await transactionsCollection
+        .aggregate([
+            { $match: match },
+            {
+                $facet: {
+                    transactions: [
+                        { $sort: { createdAt: -1 } },
+                        { $skip: skip },
+                        { $limit: limit },
+                        {
+                            $lookup: {
+                                from: 'users',
+                                localField: 'vendorId',
+                                foreignField: '_id',
+                                as: 'vendor',
+                                pipeline: [{ $project: { name: 1, email: 1, image: 1, businessName: 1 } }],
+                            },
+                        },
+                        { $unwind: { path: '$vendor', preserveNullAndEmptyArrays: true } },
+                        { $project: { stripeSessionId: 0 } },
+                    ],
+                    total: [{ $count: 'count' }],
+                },
+            },
+        ])
+        .toArray()
+
+    const total = result.total[0]?.count || 0
+    res.send({ transactions: result.transactions, total, page, totalPages: Math.ceil(total / limit) })
 })
 
 export default router
