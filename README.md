@@ -6,7 +6,9 @@
 
 This server stores services, booking requests and payments in MongoDB, verifies the JWT sent by the WedPlan frontend, checks the user's role on every protected route, and turns on Premium only after a verified Stripe webhook.
 
-**Live API:** [wedplan-server-api.vercel.app](https://wedplan-server-api.vercel.app) &nbsp;·&nbsp; **Live Site:** [wedplan-febappi.vercel.app](https://wedplan-febappi.vercel.app) &nbsp;·&nbsp; **Frontend:** [WedPlan](https://github.com/febappi/WedPlan)
+**Live API:** [wedplan-server-api.vercel.app](https://wedplan-server-api.vercel.app) &nbsp;·&nbsp; **Live Site:** [wedplan-febappi.vercel.app](https://wedplan-febappi.vercel.app)
+
+**Client Repository:** [github.com/febappi/WedPlan](https://github.com/febappi/WedPlan) &nbsp;·&nbsp; **Server Repository:** [github.com/febappi/WedPlan-Server](https://github.com/febappi/WedPlan-Server)
 
 <br>
 
